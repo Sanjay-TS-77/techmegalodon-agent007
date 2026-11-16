@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="Build, run and review agent workflows in a self-hosted workspace.">
+  <title>Agent007 · Workflow studio</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">Skip to workspace</a>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Agent007<small>by TechMegalodon</small></span></div>
+    <div class="topbar-detail">
+      <span class="studio-label">Workflow studio</span>
+      <button id="open-sdk" type="button" class="topbar-button">SDK</button>
+      <span class="model-state" id="model-state"><i aria-hidden="true"></i><span id="model-label">Checking runtime</span></span>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="rail" aria-label="Workflow library and run history">
+      <section aria-labelledby="library-title" class="rail-section">
+        <div class="rail-heading"><h2 id="library-title">Workflows</h2><button class="small-button" type="button" id="new-workflow" aria-label="Create workflow">+ New</button></div>
+        <div id="workflow-list" class="rail-list"><p class="rail-empty">Loading workflows…</p></div>
+      </section>
+      <section aria-labelledby="history-title" class="rail-section history-section">
+        <div class="rail-heading"><h2 id="history-title">Run history</h2><button class="small-button" type="button" id="refresh-history">Refresh</button></div>
+        <div id="run-list" class="rail-list"><p class="rail-empty">Loading runs…</p></div>
+      </section>
+      <section class="rail-section" aria-labelledby="metrics-title">
+        <div class="rail-heading"><h2 id="metrics-title">Run metrics</h2></div>
+        <dl id="run-metrics" class="metrics"><div><dt>Total runs</dt><dd>—</dd></div><div><dt>Awaiting review</dt><dd>—</dd></div><div><dt>Success rate</dt><dd>—</dd></div><div><dt>Model tokens</dt><dd>—</dd></div></dl>
+      </section>
+    </aside>
+    <main class="workspace" id="workspace" tabindex="-1">
+      <div class="workspace-header">
+        <div class="workspace-intro">
+          <h1 id="workflow-title">Workflow studio</h1>
+          <p id="workflow-subtitle">Build a workflow and inspect each run.</p>
+        </div>
+        <div class="toolbar">
+          <button type="button" class="button secondary" id="open-planner">Plan workflow</button>
+          <button class="button secondary" type="button" id="import-button">Import JSON</button>
+          <input type="file" accept=".json,application/json" id="import-file" hidden>
+          <button type="button" class="button secondary" id="export-workflow">Export</button>
+          <button type="submit" form="workflow-form" class="button primary" id="save-workflow">Save workflow</button>
+        </div>
+      </div>
+      <p class="notice" id="notice" role="status" hidden></p>
+      <div class="studio-grid">
+        <section class="card designer" aria-labelledby="editor-title">
+          <div class="card-header">
+            <div><h2 id="editor-title">Workflow editor</h2><p>Arrange steps and set approval points.</p></div>
+            <span class="count-tag" id="step-count">0 steps</span>
+          </div>
+          <form id="workflow-form">
+            <fieldset id="workflow-fields" disabled>
+              <div class="metadata">
+                <label for="workflow-name">Name</label>
+                <input id="workflow-name" name="name" maxlength="120" placeholder="Workflow name" required>
+                <label for="workflow-description">Description</label>
+                <textarea id="workflow-description" name="description" rows="2" maxlength="2000" placeholder="What this workflow does"></textarea>
+              </div>
+              <div class="steps-heading"><h3>Steps</h3><details class="variable-help"><summary>Variables</summary><p>Use <code>{{input}}</code> for the run input or <code>{{steps.step_id}}</code> for the text from an earlier step.</p></details></div>
+              <ol class="steps" id="steps"></ol>
+              <div class="add-step">
+                <label for="step-type" class="sr-only">Step type to add</label>
+                <select id="step-type"><option value="template">Template</option><option value="prompt">Model prompt</option><option value="approval">Human approval</option><option value="connector">Connector</option></select>
+                <button type="button" class="button secondary add-button" id="add-step">+ Add step</button>
+              </div>
+            </fieldset>
+          </form>
+        </section>
+        <div class="run-column">
+          <section class="card run-setup" aria-labelledby="run-title">
+            <div class="card-header"><div><h2 id="run-title">Run workflow</h2><p id="run-help">Preview the flow with a sample brief.</p></div></div>
+            <form id="run-form">
+              <fieldset id="run-fields" disabled>
+                <div class="mode-group" role="group" aria-label="Run mode">
+                  <label class="mode-option"><input type="radio" name="mode" value="preview" checked><span>Preview</span></label>
+                  <label class="mode-option" id="live-option"><input type="radio" name="mode" value="live" id="live-mode" disabled><span>Live run</span></label>
+                </div>
+                <label for="run-input">Brief or input</label>
+                <textarea id="run-input" rows="4" maxlength="20000" placeholder="Describe what this run should work on."></textarea>
+                <button type="submit" class="button primary run-button" id="start-run"><span aria-hidden="true">▶</span> Start run</button>
+              </fieldset>
+            </form>
+          </section>
+          <section class="card inspector" id="inspector" aria-labelledby="inspector-title">
+            <div class="card-header"><div><h2 id="inspector-title">Run details</h2><p id="inspector-meta">Output and decisions appear here.</p></div><span id="run-status" class="state-pill" hidden></span></div>
+            <div id="run-content" class="run-content">
+              <div class="empty-state"><span class="empty-icon" aria-hidden="true">↳</span><p>Start a run or select one from history.</p></div>
+            </div>
+          </section>
+          <section class="card connectors" aria-labelledby="connectors-title">
+            <div class="card-header"><div><h2 id="connectors-title">Connectors</h2><p>Services available to your workflows.</p></div></div>
+            <ul id="connector-list" class="connector-list"><li class="muted">Checking configuration…</li></ul>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+  <dialog id="planner-dialog" class="dialog" aria-labelledby="planner-title">
+    <div class="dialog-header"><h2 id="planner-title">Plan a workflow</h2><button type="button" id="close-planner" class="small-button">Close</button></div>
+    <form id="planner-form" class="dialog-body">
+      <label for="plan-goal">What should the workflow achieve?</label>
+      <textarea id="plan-goal" rows="5" maxlength="2000" placeholder="Example: Summarise a support request, draft a reply, and ask a reviewer to approve it." required autofocus></textarea>
+      <label for="plan-mode">Planning mode</label>
+      <select id="plan-mode"><option value="preview">Workflow templates</option><option value="live" id="plan-live" disabled>Hosted model</option></select>
+      <p id="plan-status" class="form-status" role="status"></p>
+      <button type="submit" class="button primary" id="generate-plan">Create draft</button>
+    </form>
+  </dialog>
+  <dialog id="sdk-dialog" class="dialog" aria-labelledby="sdk-title">
+    <div class="dialog-header"><h2 id="sdk-title">Use the workflow SDK</h2><button type="button" id="close-sdk" class="small-button">Close</button></div>
+    <div class="dialog-body">
+      <p>With Agent007 running, save this snippet as a JavaScript module in the project root and run it with Node.js 24.</p>
+      <pre id="sdk-code"></pre>
+      <button type="button" class="button secondary" id="copy-sdk">Copy snippet</button>
+      <p id="sdk-status" class="form-status" role="status"></p>
+    </div>
+  </dialog>
+</body>
+</html>

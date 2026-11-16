@@ -1,0 +1,10 @@
+.git
+.github
+.env
+.env.*
+.agent007
+node_modules
+test
+*.sqlite
+*.sqlite-*
+*.log

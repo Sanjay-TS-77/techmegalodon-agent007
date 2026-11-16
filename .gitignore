@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+.agent007/
+node_modules/
+*.sqlite
+*.sqlite-*
+*.log

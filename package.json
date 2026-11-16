@@ -1,0 +1,20 @@
+{
+  "name": "@techmegalodon/agent007",
+  "version": "0.1.0",
+  "description": "Open-source studio for building, running and reviewing AI workflows",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": { "node": ">=24" },
+  "exports": {
+    ".": {
+      "types": "./src/sdk.d.mts",
+      "import": "./src/sdk.mjs"
+    },
+    "./engine": "./src/workflow.mjs"
+  },
+  "files": ["src", "public", "examples", "README.md", "CONTRIBUTING.md", "LICENSE", "NOTICE"],
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/server.mjs",
+    "test": "node --test"
+  }
+}

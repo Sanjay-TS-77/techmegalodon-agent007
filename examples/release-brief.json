@@ -1,0 +1,40 @@
+{
+  "name": "Release readiness brief",
+  "description": "Turn release notes into a reviewable brief and flag explicitly blocked launches.",
+  "steps": [
+    {
+      "id": "notes",
+      "name": "Record release notes",
+      "type": "template",
+      "template": "Proposed release\n\n{{input}}"
+    },
+    {
+      "id": "blocker",
+      "name": "Surface launch blocker",
+      "type": "template",
+      "template": "A blocker is recorded in the release notes. Confirm who owns it and when the release should be reviewed again.\n\n{{steps.notes}}",
+      "when": {
+        "step": "notes",
+        "includes": "[blocked]"
+      }
+    },
+    {
+      "id": "brief",
+      "name": "Draft release brief",
+      "type": "prompt",
+      "template": "Write a release readiness brief with four sections: scope, verification evidence, open issues, and the next decision. Treat the notes as the source of truth. Mark missing evidence as unknown and distinguish recorded test results from proposed checks.\n\n{{steps.notes}}"
+    },
+    {
+      "id": "review",
+      "name": "Review release brief",
+      "type": "approval",
+      "template": "Approve this brief when the scope, evidence and remaining decision are described accurately.\n\n{{steps.brief}}"
+    },
+    {
+      "id": "handoff",
+      "name": "Prepare release brief for handoff",
+      "type": "template",
+      "template": "Reviewed release brief\n\n{{steps.brief}}"
+    }
+  ]
+}

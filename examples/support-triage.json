@@ -1,0 +1,40 @@
+{
+  "name": "Support request triage",
+  "description": "Draft a customer reply, collect an approval, and surface an escalation reminder for urgent cases.",
+  "steps": [
+    {
+      "id": "request",
+      "name": "Record request",
+      "type": "template",
+      "template": "Support request\n\n{{input}}"
+    },
+    {
+      "id": "draft",
+      "name": "Draft customer reply",
+      "type": "prompt",
+      "template": "Draft a short, helpful customer support reply based on the request below. Acknowledge the reported issue, identify any facts still needed, and propose one next step the team can take. Keep promises and timelines limited to what the request explicitly confirms.\n\n{{steps.request}}"
+    },
+    {
+      "id": "review",
+      "name": "Review reply",
+      "type": "approval",
+      "template": "Check that the draft reflects the customer's request and that the proposed next step is feasible.\n\n{{steps.draft}}"
+    },
+    {
+      "id": "escalation",
+      "name": "Flag urgent request",
+      "type": "template",
+      "template": "Urgent request. Ask the support lead to confirm ownership and the next update time.\n\n{{steps.request}}",
+      "when": {
+        "step": "request",
+        "includes": "[urgent]"
+      }
+    },
+    {
+      "id": "handoff",
+      "name": "Prepare reply for handoff",
+      "type": "template",
+      "template": "Approved support draft\n\n{{steps.draft}}"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "name": "Research handoff",
+  "description": "Summarize working notes and identify what a teammate needs to verify next.",
+  "steps": [
+    {
+      "id": "notes",
+      "name": "Clean notes",
+      "type": "connector",
+      "connector": "text-clean",
+      "template": "{{input}}"
+    },
+    {
+      "id": "summary",
+      "name": "Summarize evidence",
+      "type": "prompt",
+      "template": "Summarize the notes below for a teammate. Separate observations, inferences and open questions. Preserve references that appear in the notes and label missing evidence explicitly.\n\n{{steps.notes}}"
+    },
+    {
+      "id": "next-steps",
+      "name": "Identify verification steps",
+      "type": "prompt",
+      "template": "Use the summary to propose up to three verification steps. For each, describe the question, the evidence that would answer it, and the smallest useful action.\n\n{{steps.summary}}"
+    },
+    {
+      "id": "handoff",
+      "name": "Assemble handoff",
+      "type": "template",
+      "template": "Summary\n\n{{steps.summary}}\n\nVerification steps\n\n{{steps.next-steps}}"
+    }
+  ]
+}
