@@ -223,7 +223,7 @@ export async function advanceRun(run, { invoke, invokeConnector, onCheckpoint = 
   }
 }
 
-export function resolveApproval(run, { approve, note } = {}) {
+export function resolveApproval(run, { approve, note } = {}, actor) {
   if (advancing.has(run) || run.status !== 'awaiting_approval' || !run.pendingApproval) {
     throw new Error('This run has no approval available to resolve.');
   }
@@ -237,10 +237,10 @@ export function resolveApproval(run, { approve, note } = {}) {
     run.outputs[stepId] = decisionNote || 'Approved';
     run.cursor += 1;
     run.status = 'running';
-    recordEvent(run, 'approval_granted', { stepId, message: decisionNote || 'Approved' });
+    recordEvent(run, 'approval_granted', { stepId, message: decisionNote || 'Approved', ...(actor && { actor }) });
   } else {
     run.status = 'rejected';
-    recordEvent(run, 'approval_rejected', { stepId, message: decisionNote || 'Rejected' });
+    recordEvent(run, 'approval_rejected', { stepId, message: decisionNote || 'Rejected', ...(actor && { actor }) });
     recordEvent(run, 'run_rejected');
   }
   return run;

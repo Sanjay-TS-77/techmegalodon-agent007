@@ -38,8 +38,14 @@ export interface RunEvent {
   message?: string;
   durationMs?: number;
   model?: string;
+  actor?: { id: string; username: string };
   usage?: { inputTokens: number; outputTokens: number };
 }
+
+export type RunSource =
+  { type: 'manual'; userId?: string; username?: string } |
+  { type: 'schedule'; triggerId: string; scheduledAt: string } |
+  { type: 'webhook'; triggerId: string };
 
 export interface RunSummary {
   id: string;
@@ -48,6 +54,7 @@ export interface RunSummary {
   mode: Mode;
   createdAt: string;
   updatedAt: string;
+  source?: RunSource;
 }
 
 export interface Run extends Omit<RunSummary, 'workflowName'> {
@@ -70,6 +77,30 @@ export interface Connector {
   configured: boolean;
 }
 
+interface TriggerSettings {
+  name: string;
+  workflowId: string;
+  mode?: Mode;
+  enabled?: boolean;
+  input?: string;
+}
+
+export type NewTrigger = TriggerSettings & (
+  { type: 'schedule'; intervalMinutes: number } |
+  { type: 'webhook'; intervalMinutes?: never }
+);
+
+export interface Trigger extends Required<TriggerSettings> {
+  id: string;
+  type: 'schedule' | 'webhook';
+  intervalMinutes: number | null;
+  nextAt: string | null;
+  lastRunId: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Metrics {
   runs: number;
   totalTokens: number;
@@ -90,6 +121,11 @@ export interface Client {
   startRun(options: { workflowId: string; input?: string; mode?: Mode }): Promise<Run>;
   decideRun(id: string, decision: { approve: boolean; note?: string }): Promise<Run>;
   listConnectors(): Promise<Connector[]>;
+  listTriggers(): Promise<Trigger[]>;
+  createTrigger(trigger: NewTrigger): Promise<{trigger: Trigger; secret?: string}>;
+  updateTrigger(id: string, changes: Partial<TriggerSettings> & { intervalMinutes?: number }): Promise<Trigger>;
+  removeTrigger(id: string): Promise<void>;
+  rotateWebhook(id: string): Promise<{trigger: Trigger; secret: string}>;
   getMetrics(): Promise<Metrics>;
   plan(goal: string, mode?: Mode): Promise<{ workflow: Workflow; summary: string }>;
   waitForRun(id: string, options?: { intervalMs?: number; timeoutMs?: number; signal?: AbortSignal }): Promise<Run>;

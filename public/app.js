@@ -1,3 +1,6 @@
+import { createGraph } from "./graph.js";
+import { createWorkspaceTools } from "./workspace.js";
+
 const byId = (id) => document.getElementById(id);
 const types = {
   template: { label: "Template", marker: "T", field: "Template" },
@@ -20,10 +23,14 @@ const state = {
   run: null,
   connectors: [],
   config: null,
+  session: null,
+  sessionVersion: 0,
+  ready: false,
   busy: false,
   polling: false,
   localNumber: 0,
   lastHistoryRefresh: 0,
+  lastRunRefresh: 0,
 };
 
 function element(tag, className, text) {
@@ -41,14 +48,17 @@ function button(label, className, listener) {
 }
 
 async function request(url, method = "GET", body) {
+  const version = state.sessionVersion;
   const response = await fetch(url, {
     method,
     headers: body === undefined ? {} : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await response.json().catch(() => null);
+  if (version !== state.sessionVersion) throw new Error("The workspace session changed.");
   if (!response.ok || data === null) {
     const message = typeof data?.error === "string" ? data.error : data?.error?.message;
+    if (response.status === 401 && !url.startsWith("/api/auth/")) workspaceTools.expire();
     throw new Error(message || "Request failed (" + response.status + ").");
   }
   return data;
@@ -119,20 +129,21 @@ function renderHeading() {
 
 function refreshControls() {
   const active = currentEntry();
+  const canEdit = workspaceTools.canEdit();
   const needsModel = active?.workflow.steps.some((step) => step.type === "prompt");
   const canRunLive = Boolean(state.config) && (!needsModel || state.config.liveConfigured);
   const live = byId("live-mode");
-  byId("workflow-fields").disabled = !active || state.busy;
-  byId("run-fields").disabled = !active || state.busy;
-  byId("save-workflow").disabled = !active || state.busy || !active.dirty;
+  byId("workflow-fields").disabled = !canEdit || !active || state.busy;
+  byId("run-fields").disabled = !canEdit || !active || state.busy;
+  byId("save-workflow").disabled = !canEdit || !active || state.busy || !active.dirty;
   byId("export-workflow").disabled = !active || state.busy;
-  byId("open-planner").disabled = state.busy;
-  byId("new-workflow").disabled = state.busy;
-  byId("import-button").disabled = state.busy;
+  byId("open-planner").disabled = !canEdit || state.busy;
+  byId("new-workflow").disabled = !canEdit || state.busy;
+  byId("import-button").disabled = !canEdit || state.busy;
   byId("add-step").disabled = (active?.workflow.steps.length ?? 0) >= 32;
   live.disabled = !canRunLive;
   if (live.checked && !canRunLive) byId("run-form").elements.mode.value = "preview";
-  byId("run-help").textContent = needsModel && !canRunLive
+  byId("run-help").textContent = !canEdit ? "An editor or admin can start a run." : needsModel && !canRunLive
     ? "Preview works without a model key. Configure a provider for a live run."
     : "Rehearse in preview or run with the configured services.";
   byId("live-option").title = canRunLive ? "Use configured services" : "Configure a model provider for this workflow";
@@ -168,6 +179,7 @@ function markDirty(entry) {
   entry.dirty = true;
   renderHeading();
   renderLibrary();
+  graph.showWorkflow(entry);
   refreshControls();
 }
 
@@ -287,6 +299,7 @@ function renderSteps(entry) {
     const row = element("li", "step");
     const details = element("details", "step-detail");
     const summary = element("summary", "step-summary");
+    summary.id = "step-summary-" + index;
     const number = element("span", "step-index", String(index + 1).padStart(2, "0"));
     number.setAttribute("aria-hidden", "true");
     const icon = element("span", "step-icon " + step.type, type.marker);
@@ -342,7 +355,7 @@ function renderSteps(entry) {
   });
 }
 
-function selectWorkflow(key) {
+function selectWorkflow(key, showDraft = true) {
   const entry = state.library.get(key);
   if (!entry) return;
   state.selected = key;
@@ -352,6 +365,7 @@ function selectWorkflow(key) {
   renderHeading();
   renderLibrary();
   renderSteps(entry);
+  graph.showWorkflow(entry, showDraft);
   refreshControls();
 }
 
@@ -378,22 +392,33 @@ async function persistWorkflow(entry) {
 
 function renderRuntime() {
   const config = state.config;
-  byId("model-state").dataset.kind = config ? "ready" : "error";
-  byId("model-label").textContent = config?.liveConfigured ? (config.model || "Live model ready") : config ? "Preview ready" : "Runtime unavailable";
+  const demo = state.session?.enabled === false;
+  const label = config?.liveConfigured ? (config.model || "Live model ready") : config ? "Preview ready" : "Runtime unavailable";
+  byId("model-state").dataset.kind = demo ? "demo" : config ? "ready" : "error";
+  byId("model-label").textContent = demo ? "Demo · " + label : label;
   refreshControls();
 }
 
 function renderConnectors() {
   const list = byId("connector-list");
+  const search = byId("connector-search").value.toLowerCase().trim();
+  const filtered = state.connectors.filter((connector) => [connector.name, connector.id, connector.description].join(" ").toLowerCase().includes(search));
+  byId("connector-count").textContent = String(state.connectors.length);
   list.replaceChildren();
-  if (!state.connectors.length) list.append(element("li", "muted", "No connectors available."));
-  for (const connector of state.connectors) {
+  if (!filtered.length) list.append(element("li", "muted", search ? "No connectors match your search." : "No connectors available."));
+  for (const connector of filtered) {
     const item = element("li");
     const name = element("div", "connector-name");
     name.append(element("strong", "", connector.name), element("span", "", connector.configured ? "Configured" : "Needs setup"));
     item.append(name, element("p", "", connector.description));
     list.append(item);
   }
+}
+
+function runSource(source) {
+  if (source?.type === "schedule") return "Scheduled";
+  if (source?.type === "webhook") return "Webhook";
+  return source?.username ? "Started by " + source.username : "";
 }
 
 function renderHistory() {
@@ -417,7 +442,7 @@ function renderHistory() {
     const dot = element("span", "history-dot " + run.status);
     dot.setAttribute("aria-hidden", "true");
     const text = element("span", "rail-text");
-    text.append(element("strong", "", label), element("small", "", status + " · " + mode));
+    text.append(element("strong", "", label), element("small", "", [status, runSource(run.source) || mode].join(" · ")));
     item.append(dot, text);
     list.append(item);
   }
@@ -463,6 +488,10 @@ function outputText(output) {
 function approvalBox(run) {
   const block = element("div", "approval-box");
   block.append(element("h3", "", "Approval requested"), element("p", "", run.pendingApproval.message));
+  if (!workspaceTools.canEdit()) {
+    block.append(element("p", "muted", "An editor or admin can review this step."));
+    return block;
+  }
   const notes = field("review-note", "Reviewer note (optional)", {
     value: "", change() {},
   }, { multiline: true, rows: 2, max: 2000 });
@@ -511,6 +540,8 @@ function timeline(run, stepNames) {
       if (Number.isFinite(inputTokens)) detail.push(inputTokens + " input tokens");
       if (Number.isFinite(outputTokens)) detail.push(outputTokens + " output tokens");
     }
+    const actor = event.actor?.username || event.username;
+    if (actor) detail.push(actor);
     const description = detail.filter(Boolean).join(" · ");
     if (description) item.append(element("span", "event-details", description));
     const time = element("time", "", shortDate(event.at));
@@ -523,12 +554,16 @@ function timeline(run, stepNames) {
   return section;
 }
 
-function showRun(run) {
+function showRun(run, showTrace = false) {
   if (state.selectedRunId !== run.id) return;
   const prior = state.run;
   if (prior?.id === run.id && prior.updatedAt === run.updatedAt &&
-    prior.status === run.status && prior.events?.length === run.events?.length) return;
+    prior.status === run.status && prior.events?.length === run.events?.length) {
+    if (showTrace) graph.showRun(run, true);
+    return;
+  }
   state.run = run;
+  graph.showRun(run, showTrace);
   const content = byId("run-content");
   const previouslyOpen = new Set([...content.querySelectorAll(".output[open]")].map((item) => item.dataset.step));
   const pill = byId("run-status");
@@ -536,7 +571,7 @@ function showRun(run) {
   pill.textContent = statusNames[run.status] || run.status;
   pill.className = "state-pill " + run.status;
   const mode = run.mode === "live" ? "Live" : "Preview";
-  byId("inspector-meta").textContent = [run.workflow?.name, mode, shortDate(run.createdAt)].filter(Boolean).join(" · ");
+  byId("inspector-meta").textContent = [run.workflow?.name, mode, runSource(run.source), shortDate(run.createdAt)].filter(Boolean).join(" · ");
   content.replaceChildren();
   if (run.pendingApproval) content.append(approvalBox(run));
   if (run.error) content.append(element("p", "run-error", typeof run.error === "string" ? run.error : run.error.message));
@@ -561,24 +596,27 @@ async function openRun(id) {
   state.selectedRunId = id;
   renderHistory();
   const data = await request("/api/runs/" + encodeURIComponent(id));
-  showRun(data.run);
+  showRun(data.run, true);
 }
 
 async function pollRuns() {
-  if (state.polling || state.busy) return;
-  const active = state.run?.status === "running" && state.selectedRunId === state.run.id;
+  if (!state.ready || state.polling || state.busy || document.hidden) return;
+  const current = state.run;
+  const watchingRun = current?.id === state.selectedRunId && (current?.status === "running" || current?.status === "awaiting_approval");
+  const readRun = watchingRun && (current.status === "running" || Date.now() - state.lastRunRefresh >= 3500);
   const otherRunning = state.runs.some((run) => run.status === "running");
-  if (!active && (!otherRunning || Date.now() - state.lastHistoryRefresh < 3500)) return;
+  const readHistory = Date.now() - state.lastHistoryRefresh >= (otherRunning ? 3500 : 7500);
+  if (!readRun && !readHistory) return;
   state.polling = true;
+  let changed = false;
   try {
-    if (active) {
-      const id = state.run.id;
-      const data = await request("/api/runs/" + encodeURIComponent(id));
+    if (readRun) {
+      const data = await request("/api/runs/" + encodeURIComponent(current.id));
+      state.lastRunRefresh = Date.now();
       if (!state.busy) showRun(data.run);
-      if (data.run.status !== "running") await refreshHistory();
-    } else {
-      await refreshHistory();
+      changed = data.run.status !== current.status;
     }
+    if (readHistory || changed) await refreshHistory();
   } catch (error) {
     showError(error);
   } finally {
@@ -587,6 +625,7 @@ async function pollRuns() {
 }
 
 byId("new-workflow").addEventListener("click", newWorkflow);
+byId("connector-search").addEventListener("input", renderConnectors);
 byId("workflow-name").addEventListener("input", (event) => {
   const entry = currentEntry();
   entry.workflow.name = event.target.value;
@@ -637,7 +676,7 @@ byId("run-form").addEventListener("submit", async (event) => {
     const workflowId = await persistWorkflow(currentEntry());
     const data = await request("/api/runs", "POST", { workflowId, input: brief, mode });
     state.selectedRunId = data.run.id;
-    showRun(data.run);
+    showRun(data.run, true);
     await refreshHistory();
     if (matchMedia("(max-width: 885px)").matches) byId("inspector").scrollIntoView({ block: "start" });
   } catch (error) {
@@ -708,14 +747,18 @@ byId("planner-form").addEventListener("submit", async (event) => {
 const snippet = [
   'import { createClient } from "./src/sdk.mjs";',
   "",
-  'const forge = createClient("http://127.0.0.1:4387");',
-  "const [workflow] = await forge.listWorkflows();",
-  'const run = await forge.startRun({ workflowId: workflow.id, input: "Review this brief" });',
-  "const result = await forge.waitForRun(run.id);",
+  'const client = createClient("http://127.0.0.1:4387");',
+  "const [workflow] = await client.listWorkflows();",
+  'const run = await client.startRun({ workflowId: workflow.id, input: "Review this brief" });',
+  "const result = await client.waitForRun(run.id);",
   "console.log(result.status, result.outputs);",
 ].join("\n");
 byId("sdk-code").textContent = snippet;
-byId("open-sdk").addEventListener("click", () => byId("sdk-dialog").showModal());
+byId("open-sdk").addEventListener("click", () => {
+  const enabled = state.session?.enabled;
+  byId("sdk-help").textContent = enabled ? "Programmatic requests must include a valid session cookie. See the SDK setup in the repository README." : "With Agent007 running, save this snippet as a JavaScript module in the project root and run it with Node.js 24.";
+  byId("sdk-dialog").showModal();
+});
 byId("close-sdk").addEventListener("click", () => byId("sdk-dialog").close());
 byId("copy-sdk").addEventListener("click", async () => {
   const status = byId("sdk-status");
@@ -735,13 +778,69 @@ window.addEventListener("beforeunload", (event) => {
   if ([...state.library.values()].some((entry) => entry.dirty)) event.preventDefault();
 });
 
-async function initialize() {
+const graph = createGraph({
+  types,
+  inspect(stepId, trace) {
+    if (trace) {
+      const content = byId("run-content");
+      const output = [...content.querySelectorAll(".output")].find((item) => item.dataset.step === stepId);
+      const target = output?.querySelector("summary") || byId("inspector-title");
+      if (output) output.open = true;
+      if (!output) target.tabIndex = -1;
+      target.focus();
+      return;
+    }
+    const entry = currentEntry();
+    const index = entry?.workflow.steps.findIndex((step) => step.id === stepId);
+    const summary = byId("step-summary-" + index);
+    if (!summary) return;
+    summary.parentElement.open = true;
+    summary.focus();
+  },
+});
+
+function clearWorkspace() {
+  state.sessionVersion++;
+  state.ready = false;
+  state.library.clear();
+  state.runs = [];
+  state.selected = null;
+  state.selectedRunId = null;
+  state.run = null;
+  state.connectors = [];
+  state.config = null;
+  state.session = null;
+  state.busy = false;
+  state.lastHistoryRefresh = 0;
+  state.lastRunRefresh = 0;
+  byId("workflow-form").reset();
+  byId("run-form").reset();
+  byId("planner-form").reset();
+  byId("steps").replaceChildren();
+  byId("run-content").replaceChildren(element("p", "muted", "Start a run or select one from history."));
+  byId("inspector-meta").textContent = "Output and decisions appear here.";
+  byId("run-status").hidden = true;
+  byId("connector-search").value = "";
+  notify();
+  renderHeading();
+  renderLibrary();
+  renderHistory();
+  renderConnectors();
+  renderMetrics({});
+  graph.showRun(null);
+  graph.showWorkflow(null, true);
+}
+
+async function initialize(session) {
+  state.session = session;
+  const version = state.sessionVersion;
   const [config, workflows, connectors, history] = await Promise.allSettled([
     request("/api/config"),
     request("/api/workflows"),
     request("/api/connectors"),
     refreshHistory(),
   ]);
+  if (version !== state.sessionVersion) return;
   if (config.status === "fulfilled") state.config = config.value;
   if (connectors.status === "fulfilled") state.connectors = connectors.value.connectors;
   renderRuntime();
@@ -750,12 +849,24 @@ async function initialize() {
     for (const workflow of workflows.value.workflows) addEntry(workflow, workflow.id);
     const first = state.library.values().next().value;
     if (first) selectWorkflow(first.key);
-    else newWorkflow();
+    else if (workspaceTools.canEdit()) newWorkflow();
   } else {
     renderLibrary();
     showError(workflows.reason);
   }
   if (history.status === "rejected") byId("run-list").replaceChildren(element("p", "rail-empty", "Run history unavailable."));
-  setInterval(pollRuns, 1300);
+  state.ready = true;
 }
-initialize().catch(showError);
+
+const workspaceTools = createWorkspaceTools({
+  request, element, button, formatDate: shortDate,
+  getWorkflows: () => [...state.library.values()].filter((entry) => entry.id),
+  canRunLive(workflowId) {
+    const entry = [...state.library.values()].find((candidate) => candidate.id === workflowId);
+    return Boolean(state.config && entry && (state.config.liveConfigured || !entry.workflow.steps.some((step) => step.type === "prompt")));
+  },
+  onReady: initialize,
+  onLock: clearWorkspace,
+});
+setInterval(pollRuns, 1300);
+workspaceTools.start();

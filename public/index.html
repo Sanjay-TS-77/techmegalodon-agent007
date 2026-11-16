@@ -3,23 +3,45 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#070e19">
   <meta name="description" content="Build, run and review agent workflows in a self-hosted workspace.">
   <title>Agent007 · Workflow studio</title>
   <link rel="stylesheet" href="/styles.css">
   <script type="module" src="/app.js"></script>
 </head>
 <body>
-  <a class="skip-link" href="#workspace">Skip to workspace</a>
+  <a class="skip-link" id="skip-workspace" href="#workspace" hidden>Skip to workspace</a>
   <header class="topbar">
     <div class="brand"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span class="brand-name">Agent007<small>by TechMegalodon</small></span></div>
-    <div class="topbar-detail">
-      <span class="studio-label">Workflow studio</span>
+    <nav class="topbar-nav" id="topbar-nav" aria-label="Studio" hidden>
+      <a class="topbar-button nav-current" href="#workspace">Studio</a>
+      <button id="open-triggers" type="button" class="topbar-button">Triggers</button>
       <button id="open-sdk" type="button" class="topbar-button">SDK</button>
+    </nav>
+    <div class="topbar-detail" id="topbar-detail" hidden>
       <span class="model-state" id="model-state"><i aria-hidden="true"></i><span id="model-label">Checking runtime</span></span>
+      <button id="open-account" type="button" class="topbar-button account-button" hidden><span id="account-avatar" aria-hidden="true"></span><span id="account-label">Account</span></button>
     </div>
   </header>
-  <div class="layout">
+  <main class="access-screen" id="access-screen" aria-labelledby="access-title">
+    <section class="access-panel">
+      <div class="access-emblem" aria-hidden="true"><i></i><i></i><i></i></div>
+      <h1 id="access-title" tabindex="-1">Connecting to workspace</h1>
+      <p id="access-help"></p>
+      <form id="access-form" method="post" hidden>
+        <div id="access-token-field" hidden>
+          <label for="access-token">Setup token</label>
+          <input id="access-token" type="password" autocomplete="off" maxlength="1024">
+        </div>
+        <div><label for="access-username">Username</label><input id="access-username" autocomplete="username" required minlength="3" maxlength="64"></div>
+        <div><label for="access-password">Password</label><input id="access-password" type="password" autocomplete="current-password" required maxlength="512"></div>
+        <button type="submit" class="button primary" id="access-submit">Sign in</button>
+      </form>
+      <p id="access-status" class="form-status" role="status"></p>
+    </section>
+  </main>
+  <div class="layout" id="studio-shell" hidden>
     <aside class="rail" aria-label="Workflow library and run history">
       <section aria-labelledby="library-title" class="rail-section">
         <div class="rail-heading"><h2 id="library-title">Workflows</h2><button class="small-button" type="button" id="new-workflow" aria-label="Create workflow">+ New</button></div>
@@ -49,6 +71,23 @@
         </div>
       </div>
       <p class="notice" id="notice" role="status" hidden></p>
+      <section class="card graph-card" aria-labelledby="graph-title">
+        <div class="card-header graph-header">
+          <div><h2 id="graph-title">Workflow graph</h2><p id="graph-caption">See the step order and dependencies.</p></div>
+          <div class="graph-views" role="group" aria-label="Graph view">
+            <button type="button" class="graph-view" id="graph-draft" aria-pressed="true">Workflow</button>
+            <button type="button" class="graph-view" id="graph-run" aria-pressed="false" disabled>Run trace</button>
+          </div>
+        </div>
+        <div class="graph-scroll" id="graph-scroll" aria-label="Workflow nodes and dependencies" tabindex="0">
+          <div id="graph-canvas" class="graph-canvas"></div>
+        </div>
+        <div class="graph-footer">
+          <ul class="graph-legend" aria-label="Edge styles"><li><i></i>Order</li><li><i></i>Data</li><li><i></i>Condition</li></ul>
+          <p id="graph-detail" class="graph-detail" role="status">Select a step to inspect it.</p>
+          <button type="button" class="small-button" id="graph-inspect" hidden>Inspect step</button>
+        </div>
+      </section>
       <div class="studio-grid">
         <section class="card designer" aria-labelledby="editor-title">
           <div class="card-header">
@@ -95,13 +134,68 @@
             </div>
           </section>
           <section class="card connectors" aria-labelledby="connectors-title">
-            <div class="card-header"><div><h2 id="connectors-title">Connectors</h2><p>Services available to your workflows.</p></div></div>
+            <div class="card-header"><div><h2 id="connectors-title">Connectors</h2></div><span class="count-tag" id="connector-count">0</span></div>
+            <label class="sr-only" for="connector-search">Search connectors</label>
+            <div class="connector-filter"><input type="search" id="connector-search" placeholder="Search connectors" autocomplete="off"></div>
             <ul id="connector-list" class="connector-list"><li class="muted">Checking configuration…</li></ul>
           </section>
         </div>
       </div>
     </main>
   </div>
+  <dialog id="trigger-dialog" class="dialog wide-dialog" aria-labelledby="trigger-title">
+    <div class="dialog-header"><h2 id="trigger-title">Workflow triggers</h2><form method="dialog"><button type="submit" class="small-button">Close</button></form></div>
+    <div class="dialog-body dialog-columns">
+      <section aria-labelledby="trigger-list-title"><h3 id="trigger-list-title">Configured triggers</h3><div class="management-list" id="trigger-list"></div></section>
+      <section id="trigger-editor" aria-labelledby="trigger-form-title">
+        <h3 id="trigger-form-title">Create a trigger</h3>
+        <form id="trigger-form" class="management-form" method="post">
+          <div><label for="trigger-name">Name</label><input id="trigger-name" required maxlength="120" placeholder="Weekly support review"></div>
+          <div><label for="trigger-workflow">Saved workflow</label><select id="trigger-workflow" required></select></div>
+          <div class="field-grid">
+            <div><label for="trigger-type">Type</label><select id="trigger-type"><option value="schedule">Schedule</option><option value="webhook">Webhook</option></select></div>
+            <div><label for="trigger-mode">Run mode</label><select id="trigger-mode"><option value="preview">Preview</option><option value="live" id="trigger-live">Live</option></select></div>
+          </div>
+          <div id="trigger-interval-field"><label for="trigger-interval">Run every (minutes)</label><input id="trigger-interval" type="number" min="1" max="43200" value="60"></div>
+          <div><label for="trigger-input">Default input</label><textarea id="trigger-input" rows="2" maxlength="20000"></textarea></div>
+          <div class="management-actions"><button type="submit" class="button primary" id="save-trigger">Create trigger</button><button class="small-button" type="button" id="cancel-trigger" hidden>Cancel edit</button></div>
+        </form>
+      </section>
+      <section id="trigger-secret-box" class="secret-box" aria-labelledby="trigger-secret-title" hidden>
+        <h3 id="trigger-secret-title">Webhook credentials</h3>
+        <p>Copy the secret now. It will only be shown here.</p>
+        <dl><dt>POST URL</dt><dd id="trigger-url"></dd><dt>Bearer token</dt><dd id="trigger-secret"></dd></dl>
+        <div class="management-actions"><button type="button" class="small-button" id="copy-webhook">Copy curl example</button><button type="button" class="small-button" id="hide-webhook">Hide credentials</button></div>
+      </section>
+      <p class="form-status" id="trigger-status" role="status"></p>
+    </div>
+  </dialog>
+  <dialog id="account-dialog" class="dialog wide-dialog" aria-labelledby="account-title">
+    <div class="dialog-header"><h2 id="account-title">Workspace access</h2><form method="dialog"><button type="submit" class="small-button">Close</button></form></div>
+    <div class="dialog-body">
+      <div class="account-summary"><p id="account-summary"></p><button class="small-button" type="button" id="sign-out">Sign out</button></div>
+      <details class="panel-detail">
+        <summary>Change your password</summary>
+        <form id="password-form" class="management-form" method="post">
+          <div><label for="current-password">Current password</label><input type="password" id="current-password" autocomplete="current-password" maxlength="512" required></div>
+          <div><label for="new-password">New password</label><input type="password" id="new-password" autocomplete="new-password" minlength="12" maxlength="512" required></div>
+          <div><button type="submit" class="button secondary">Change password</button></div>
+        </form>
+      </details>
+      <div id="user-admin" class="dialog-columns user-admin" hidden>
+        <section aria-labelledby="user-list-title"><h3 id="user-list-title">Members</h3><div class="management-list" id="user-list"></div></section>
+        <section aria-labelledby="user-form-title"><h3 id="user-form-title">Add a member</h3>
+          <form id="user-form" class="management-form" method="post">
+            <div><label for="user-name">Username</label><input id="user-name" autocomplete="off" minlength="3" maxlength="64" required></div>
+            <div><label for="user-password">Password</label><input type="password" id="user-password" autocomplete="new-password" minlength="12" maxlength="512" required></div>
+            <div><label for="user-role">Role</label><select id="user-role"><option value="editor">Editor</option><option value="viewer">Viewer</option><option value="admin">Admin</option></select></div>
+            <div class="management-actions"><button type="submit" class="button primary" id="save-user">Add member</button><button type="button" class="small-button" id="cancel-user" hidden>Cancel edit</button></div>
+          </form>
+        </section>
+      </div>
+      <p id="account-status" class="form-status" role="status"></p>
+    </div>
+  </dialog>
   <dialog id="planner-dialog" class="dialog" aria-labelledby="planner-title">
     <div class="dialog-header"><h2 id="planner-title">Plan a workflow</h2><button type="button" id="close-planner" class="small-button">Close</button></div>
     <form id="planner-form" class="dialog-body">
@@ -116,7 +210,7 @@
   <dialog id="sdk-dialog" class="dialog" aria-labelledby="sdk-title">
     <div class="dialog-header"><h2 id="sdk-title">Use the workflow SDK</h2><button type="button" id="close-sdk" class="small-button">Close</button></div>
     <div class="dialog-body">
-      <p>With Agent007 running, save this snippet as a JavaScript module in the project root and run it with Node.js 24.</p>
+      <p id="sdk-help"></p>
       <pre id="sdk-code"></pre>
       <button type="button" class="button secondary" id="copy-sdk">Copy snippet</button>
       <p id="sdk-status" class="form-status" role="status"></p>

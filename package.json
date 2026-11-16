@@ -1,9 +1,10 @@
 {
   "name": "@techmegalodon/agent007",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Open-source studio for building, running and reviewing AI workflows",
   "type": "module",
   "license": "Apache-2.0",
+  "repository": { "type": "git", "url": "git+https://github.com/Sanjay-TS-77/techmegalodon-agent007.git" },
   "engines": { "node": ">=24" },
   "exports": {
     ".": {

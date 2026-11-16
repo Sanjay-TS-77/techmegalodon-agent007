@@ -34,7 +34,7 @@ jobs:
         run: |
           docker run --detach --name agent007-ci --publish 127.0.0.1:4387:4387 agent007:ci
           trap 'docker rm --force agent007-ci' EXIT
-          if ! curl --retry 10 --retry-all-errors --retry-delay 1 --max-time 3 --fail --silent --show-error http://127.0.0.1:4387/api/config; then
+          if ! curl --retry 10 --retry-all-errors --retry-delay 1 --max-time 3 --fail --silent --show-error http://127.0.0.1:4387/api/health; then
             docker logs agent007-ci
             exit 1
           fi

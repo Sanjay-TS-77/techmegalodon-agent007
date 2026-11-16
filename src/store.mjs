@@ -76,9 +76,10 @@ export function openStore(directory) {
         SELECT id, status, mode,
           json_extract(document, '$.workflow.name') AS workflowName,
           json_extract(document, '$.createdAt') AS createdAt,
+          json_extract(document, '$.source') AS source,
           updated_at AS updatedAt
         FROM runs ORDER BY updated_at DESC, id LIMIT 200
-      `).all();
+      `).all().map(({ source, ...run }) => ({ ...run, ...(source && { source: JSON.parse(source) }) }));
     },
     saveRun(run) {
       persistRun.run(run.id, run.status, run.mode, run.updatedAt, JSON.stringify(run));

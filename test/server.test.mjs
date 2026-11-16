@@ -19,7 +19,8 @@ const fixtureWorkflow = {
 };
 
 async function startServer(options = {}) {
-  const app = createApp({ env: {}, dataDir: ':memory:', seed: false, ...options });
+  const { env, ...rest } = options;
+  const app = createApp({ dataDir: ':memory:', seed: false, ...rest, env: { AGENT007_AUTH: 'disabled', ...env } });
   app.server.listen(0, '127.0.0.1');
   try {
     await once(app.server, 'listening');

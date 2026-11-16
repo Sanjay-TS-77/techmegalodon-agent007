@@ -1,18 +1,21 @@
 # Agent007 by TechMegalodon
 
-Agent007 is an open-source studio for building, reviewing, and running AI workflows. Draft a plan, compose reusable workflows, preview them in the browser, and review each output and decision in one run history. The server, editor, engine, SDK, and examples are released together under Apache 2.0.
+Agent007 is an open-source studio for building, reviewing, and running AI workflows. Draft plans, inspect dependencies on a visual graph, automate runs with schedules and webhooks, and review results in a shared workspace. The server, editor, engine, SDK, and examples are released together under Apache 2.0.
 
 ## Quick start
 
-From a source checkout, start the app with [Node.js 24 or later](https://nodejs.org/).
+Use [Node.js 24 or later](https://nodejs.org/) in a source checkout. Copy `.env.example` to `.env`, then generate a setup token and set it as `AGENT007_SETUP_TOKEN` in `.env`.
 
 ```sh
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 npm start
 ```
 
-Open [http://127.0.0.1:4387](http://127.0.0.1:4387). Choose **Support request triage** and start a preview run with a sample request such as `[urgent] Two warehouse users cannot print shipping labels.` Review the draft at the approval step, then approve to continue or reject to end the run. The run history shows the draft, the decision, and the escalation step that matched the `[urgent]` tag.
+Open [http://127.0.0.1:4387](http://127.0.0.1:4387) and enter the token to create the first administrator. Remove the token from `.env` after setup. Choose **Support request triage** and try a preview with `[urgent] Two warehouse users cannot print shipping labels.` Approve or reject the draft and inspect the resulting graph and run history.
 
 Preview mode produces deterministic stand-in text for prompt steps. It exercises templates, conditions, approval gates, and the run history without a model account.
+
+On a fresh loopback-only installation, you can set `AGENT007_AUTH=disabled` and leave the setup token blank for a local demo. Once the data directory has accounts, they remain required.
 
 ## Build a workflow
 
@@ -25,11 +28,15 @@ Preview mode produces deterministic stand-in text for prompt steps. It exercises
 
 The editor imports and exports workflow JSON. Start with a bundled example for [support triage](examples/support-triage.json), [release readiness](examples/release-brief.json), or a [research handoff](examples/research-handoff.json).
 
+Click a node in the workflow graph to inspect or edit a step. The graph shows execution order, output references, and conditional dependencies. The run graph uses the saved revision that ran and marks the result of each step.
+
 ## Plan, connect, and review
 
 Use **Plan workflow** to turn a goal into an editable draft. Preview planning selects a workflow pattern and adds an approval step. Live planning passes the goal to the configured hosted model and validates the returned workflow before opening it in the editor.
 
-Connectors support text cleanup, word and line counts, deduplication, JSON formatting, public GitHub repositories, issues and releases, and public npm package metadata. Text and JSON connectors execute in both modes. In Preview, GitHub and npm connectors identify the requested target. In Live, they make read-only public requests.
+The 16 built-in connectors cover text cleanup, counts, deduplication, SHA-256 digests, JSON formatting and selection, CSV conversion, GitHub repositories and activity, the npm, PyPI and crates.io registries, Hacker News items, and Open Library ISBN lookups. Local transforms execute in both modes. Network connectors show their destination in Preview and make read-only requests to fixed public endpoints in Live. A workflow with only templates, approvals, and connectors can run Live without a model account.
+
+**Select JSON value** takes `{"pointer":"/items/0","value":{"items":["first"]}}`. **CSV to JSON** uses the header row as property names and preserves field values as strings. CSV supports quoted commas, quotes and newlines.
 
 The run record shows which steps ran or skipped, their outputs, approval notes, and step duration. Hosted model steps also report token usage when the provider returns it. Run metrics summarize status counts, pending approvals, success rate across finished runs, and model tokens.
 
@@ -38,6 +45,21 @@ The run record shows which steps ran or skipped, their outputs, approval notes, 
 | `POST /api/plans` | Generate a workflow draft from a JSON body with `goal` and `mode`. |
 | `GET /api/connectors` | List available connectors and the input each expects. |
 | `GET /api/metrics` | Read aggregate run and token metrics for the workspace. |
+
+## Automate runs
+
+Open **Triggers** to attach a schedule or webhook to a saved workflow. A trigger uses the latest saved revision at execution, and each run records which revision it used. Approval steps still pause automated runs for review.
+
+- **Schedule** runs every 1–43,200 minutes, starting after the first interval. The interval stays anchored to a UTC timestamp. Enabling a schedule or changing its interval resets that timestamp. After downtime, Agent007 starts one overdue occurrence and resumes the original cadence. Keep the studio running to execute schedules on time.
+- **Webhook** starts a run when an external system sends an authenticated JSON `POST`. Copy the bearer token when creating or rotating it. Send `{"input":"a message"}` for plain text, a JSON object for structured workflow input, or `{}` for the stored default. The reply contains the run ID. Send a unique `Idempotency-Key` per event to reuse the run ID on retry for 24 hours. Reusing a key with different input returns `409`.
+
+```sh
+curl -X POST "https://agent.example.com/api/webhooks/$TRIGGER_ID" \
+  -H "Authorization: Bearer $WEBHOOK_TOKEN" \
+  -H "Idempotency-Key: ticket-147-created" \
+  -H 'Content-Type: application/json' \
+  -d '{"event":"ticket.created","ticketId":147}'
+```
 
 ## Connect a hosted model
 
@@ -57,34 +79,45 @@ Set only the key for your chosen provider. Agent007 keeps the key in the server 
 
 ## Run in Docker
 
-From a source checkout, build the image and start a container.
+Prepare `.env` with a setup token as above. From a source checkout, build the image and start a container.
 
 ```sh
 docker build -t agent007 .
 docker run --rm --name agent007 \
+  --env-file .env \
   -p 127.0.0.1:4387:4387 \
   -v agent007-data:/var/lib/agent007 \
   agent007
 ```
 
-Open [http://127.0.0.1:4387](http://127.0.0.1:4387). The named volume keeps data across container restarts. To configure Live mode, pass the provider settings and key to the container through `--env-file` or your container platform's secrets mechanism.
+Open [http://127.0.0.1:4387](http://127.0.0.1:4387). The named volume keeps data across container restarts. You can supply the setup token and model key through your container platform's secrets mechanism.
 
 ## Data and access
 
-Agent007 stores workflows, run inputs and outputs, and approval history in SQLite. The data directory defaults to `.agent007`. Set `AGENT007_DATA_DIR` to use a different path. Back up this directory with the server stopped to preserve your history.
+Agent007 stores workflows, runs, accounts, and triggers in SQLite. The data directory defaults to `.agent007`. Point `AGENT007_DATA_DIR` at your existing data directory when upgrading. Back up the whole directory with the server stopped.
 
-The server listens on `127.0.0.1:4387` by default. Set `HOST` and `PORT` to change the bind address and port. Agent007 is a single workspace. Every user who can reach it can read runs and record approval decisions. Keep it on loopback or put it behind authenticated access controls when sharing it. Set `AGENT007_ALLOWED_HOSTS` to a comma-separated list of exact hostnames when running behind such a proxy.
+The server listens on `127.0.0.1:4387` by default. Set `HOST` and `PORT` to change the bind address and port. For shared deployments, serve Agent007 behind an HTTPS reverse proxy that forwards the public `Host` and set `AGENT007_ALLOWED_HOSTS` to the exact public hostname. Custom hosts use Secure cookies by default. The app throttles failed sign-in attempts by direct connection IP. Use client-IP rate limits at the proxy if it combines traffic from multiple users.
+
+All accounts share the same workflow library and run history. Admins manage accounts and can do everything editors can. Editors build workflows, start runs, manage triggers, and record approvals. Viewers can inspect the workspace and runs. Passwords use scrypt, and administrators can disable accounts or reset their passwords. Disabling an account revokes its sessions.
 
 Every save records a workflow revision. Runs keep the revision they started with, and `GET /api/workflows/{id}/versions` retrieves earlier revisions. An approval remains available across a restart. Runs interrupted mid-step are recorded as failed so the server avoids repeating a model call.
 
 ## JavaScript SDK
 
-With the server running, save this module in the source checkout and run it with `node`.
+With the server running, save this module in the source checkout and run it with `node`. Set `AGENT007_USER` and `AGENT007_PASSWORD` for an editor or administrator account in the client process environment.
 
 ```js
 import { createClient } from './src/sdk.mjs';
 
-const client = createClient();
+const base = 'http://127.0.0.1:4387';
+const login = await fetch(`${base}/api/auth/login`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ username: process.env.AGENT007_USER, password: process.env.AGENT007_PASSWORD }),
+});
+if (!login.ok) throw new Error(`Sign-in failed (${login.status})`);
+const cookie = login.headers.get('set-cookie').split(';', 1)[0];
+const client = createClient(base, { headers: { cookie } });
 const { workflow } = await client.plan('Draft a response to a support request for review.');
 const saved = await client.createWorkflow(workflow);
 const started = await client.startRun({ workflowId: saved.id, input: 'Two users cannot print labels.' });
@@ -95,11 +128,11 @@ if (run.pendingApproval) {
 }
 ```
 
-After a human reviews the draft, `client.decideRun(run.id, { approve: true, note: 'Reviewed' })` records the decision. The SDK includes TypeScript declarations for workflows, outputs, connectors, and run events.
+After a human reviews the draft, `client.decideRun(run.id, { approve: true, note: 'Reviewed' })` records the decision. Use `client.createTrigger(...)` and `client.listTriggers()` to manage automation. The SDK includes TypeScript declarations for workflows, runs, connectors, and triggers and is available as an installable tarball on the [GitHub release page](https://github.com/Sanjay-TS-77/techmegalodon-agent007/releases).
 
 ## Release scope
 
-Version 0.1 includes editable plans, a versioned workflow library, a JavaScript SDK, five hosted model adapters, eight built-in connectors, conditional steps, approvals, and run traces. Deployment is single-workspace. Planned areas include multi-user identity and access policies, scheduled and webhook triggers, a larger connector catalogue, workflow graphs, and production operations across multiple workers.
+Version 0.2 adds shared workspace accounts, workflow graphs, scheduled and webhook triggers, and eight new connectors. This release runs as a single studio process with one SQLite-backed workspace.
 
 ## Develop
 

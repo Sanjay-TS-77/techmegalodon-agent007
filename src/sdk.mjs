@@ -85,6 +85,21 @@ export function createClient(baseUrl = 'http://127.0.0.1:4387', options = {}) {
     async listConnectors() {
       return (await request('api/connectors')).connectors;
     },
+    async listTriggers() {
+      return (await request('api/triggers')).triggers;
+    },
+    async createTrigger(trigger) {
+      return request('api/triggers', { method: 'POST', body: trigger });
+    },
+    async updateTrigger(id, changes) {
+      return (await request(`api/triggers/${endpointId(id)}`, { method: 'PATCH', body: changes })).trigger;
+    },
+    async removeTrigger(id) {
+      await request(`api/triggers/${endpointId(id)}`, { method: 'DELETE' });
+    },
+    async rotateWebhook(id) {
+      return request(`api/triggers/${endpointId(id)}/rotate`, { method: 'POST' });
+    },
     async getMetrics() {
       return request('api/metrics');
     },
